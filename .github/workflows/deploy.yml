@@ -78,6 +78,9 @@ jobs:
         with:
           name: site
           path: public
+          # Keep dotfiles such as .well-known/; the default drops them, and
+          # hugo deploy would then delete them from the bucket as stale.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
 
