@@ -3,8 +3,7 @@
 One way to host and deploy a Hugo site on AWS: a private S3 bucket behind
 CloudFront, a DNS-validated ACM certificate, a GitHub OIDC deploy role, and a
 reusable GitHub Actions workflow that builds, applies Terraform and runs
-`hugo deploy`. Used by alexraskin.com, photography.alexraskin.com and
-standwithiran.org.
+`hugo deploy`. Used by alexraskin.com, photography.alexraskin.com
 
 ## Terraform modules
 
