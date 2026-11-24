@@ -1,0 +1,15 @@
+[settings]
+lockfile = true
+
+[tools]
+terraform = "1.17"
+pre-commit = "latest"
+tflint = "latest"
+terraform-docs = "0.20.0"  # matches terraform-docs/gh-actions, so CI and local agree
+trivy = "latest"
+python = "3.13"  # for pre-commit
+shellcheck = "0.11"  # actionlint shells out to it; CI runners have it, so pin it here too
+
+[tasks.lint]
+description = "Run every pre-commit hook on all files"
+run = "pre-commit run --all-files"

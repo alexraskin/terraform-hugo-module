@@ -1,0 +1,120 @@
+name: Hugo site
+
+# Shared build + deploy for Hugo sites on S3/CloudFront. The caller repo provides:
+#   mise tasks  lint, build (into public/), deploy (hugo deploy), tf:init, tf:plan, tf:apply
+#   GitHub environment <environment> with vars AWS_ROLE_ARN, AWS_REGION
+# Build runs on every event; deploy only when the caller passes deploy: true.
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        description: Apply Terraform and hugo deploy after the build. Pass true only for the default branch.
+        type: boolean
+        default: false
+      environment:
+        description: GitHub environment (and TF_ENV) to deploy to.
+        type: string
+        default: prod
+      url:
+        description: Site URL shown on the deployment.
+        type: string
+        default: ""
+      prebuild-task:
+        description: mise task to run before the build, e.g. one that fetches content kept outside git.
+        type: string
+        default: ""
+      prebuild-role-arn:
+        description: Role the build job assumes for prebuild-task.
+        type: string
+        default: ""
+      prebuild-aws-region:
+        type: string
+        default: us-east-1
+
+permissions:
+  contents: read
+
+env:
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # only used with prebuild-role-arn
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - run: mise run lint
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # tflint --init downloads rulesets from GitHub
+
+      - if: inputs.prebuild-role-arn != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ inputs.prebuild-role-arn }}
+          aws-region: ${{ inputs.prebuild-aws-region }}
+
+      - if: inputs.prebuild-task != ''
+        run: mise run "$TASK"
+        env:
+          TASK: ${{ inputs.prebuild-task }}
+
+      - run: mise run build
+
+      - if: inputs.deploy
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site
+          path: public
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    needs: build
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    # The deploy role trusts only this environment's OIDC sub.
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_ENV: ${{ inputs.environment }}
+    steps:
+      # Submodules too: hugo deploy loads the full site config, theme included.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - run: mise run tf:init
+      - run: mise run tf:plan
+      - run: mise run tf:apply
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: site
+          path: public
+
+      - run: mise run deploy
